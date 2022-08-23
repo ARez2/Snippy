@@ -192,6 +192,24 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                 },
                             };
                         }
+                        KeyCode::Tab => {
+                            for _i in 0..4 {
+                                input_field.push(' ');
+                            }
+                        }
+                        KeyCode::BackTab => {
+                            let inp = input_field.clone();
+                            let lines = inp.lines();
+                            if let Some(lastline) = lines.last() {
+                                if lastline.starts_with('\t') {
+                                    input_field.pop();
+                                } else if lastline.ends_with("    ") {
+                                    for _i in 0..4 {
+                                        input_field.pop();
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 },
@@ -237,6 +255,10 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
             };
             app.current_snippet = None;
         };
+        
+        
+        terminal.draw(|f| ui(f, &app))?;
+        
     }
 }
 
@@ -367,16 +389,19 @@ fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: 
         .block(Block::default().borders(Borders::ALL).title(Spans::from(txt)));
     f.render_widget(input_para, *render_area);
     if set_cursor {
-        let mut len_measure = input.width();
-        let lines = input.lines();
+        let mut len_measure = input.len();
+        let lines = input.split('\n');
         let mut line_count = lines.clone().count() as u16;
         line_count = std::cmp::max(line_count, 1);
         if let Some(last_line) = lines.last() {
-            len_measure = last_line.width();
+            len_measure = last_line.len();
+            if last_line.ends_with('\n') {
+                line_count += 1;
+            }
         }
         f.set_cursor(
             render_area.x + len_measure as u16 + 1,
-            render_area.y + line_count,
+            render_area.y + line_count as u16,
         );
     }
 }
