@@ -1,8 +1,3 @@
-// TODO: UI
-// TODO: Copy button ("quick copy")
-// TODO: Delete existing Snippet
-// TODO: Edit Snippet
-
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -14,73 +9,15 @@ use tui::{
     layout::{Constraint, Direction, Layout, Rect, Margin},
     style::{Color, Modifier, Style},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType, ListState},
     Frame, Terminal,
 };
-use unicode_width::UnicodeWidthStr;
+extern crate clipboard;
+use clipboard::ClipboardProvider;
+use clipboard::ClipboardContext;
 
+use Snippy::{app::{App, InputMode, NewSnippetMode}, snippet::CodeSnippet};
 
-#[derive(Clone, PartialEq)]
-struct CodeSnippet {
-    tags: Vec<String>,
-    name: String,
-    code: String,
-}
-impl CodeSnippet {
-    fn new() -> CodeSnippet {
-        CodeSnippet { tags: vec![],
-            name: "Unnamed Code Snippet".to_string(),
-            code: "".to_string(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum NewSnippetMode {
-    TypeName,
-    TypeTags,
-    TypeCode,
-}
-
-
-#[derive(Clone, PartialEq)]
-enum InputMode {
-    Normal,
-    Search,
-    NewSnippet(NewSnippetMode),
-}
-
-/// App holds the state of the application
-#[derive(Clone)]
-struct App {
-    input: String,
-    input_mode: InputMode,
-    snippets: Vec<CodeSnippet>,
-    /// Found snippets displayed when searching
-    found_snippets: Vec<CodeSnippet>,
-    // Currently edited snippet
-    current_snippet: Option<CodeSnippet>,
-}
-
-impl Default for App {
-    fn default() -> App {
-        let mut example_snippet = CodeSnippet::new();
-        example_snippet.name = "Example Snippet #1".to_string();
-        example_snippet.code = "enum InputMode {
-            Normal,
-            Search,
-            NewSnippet,
-        }".to_string();
-        example_snippet.tags = vec!["example".to_string(), "bro".to_string()];
-        App {
-            input: String::new(),
-            input_mode: InputMode::Search,
-            snippets: vec![example_snippet],
-            found_snippets: vec![],
-            current_snippet: None,
-        }
-    }
-}
 
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -90,9 +27,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    // Try out this: terminal.show_cursor()?;
 
     // create app and run it
     let mut app = App::default();
+    app.found_snippets.state = ListState::default();
     let res = run_app(&mut terminal, &mut app);
 
     // restore terminal
@@ -113,13 +52,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Result<()> {
     loop {
-        terminal.draw(|f| ui(f, &app))?;
-        let snippets: &mut Vec<CodeSnippet> = &mut app.snippets;
+        terminal.draw(|f| ui(f, &mut app))?;
         
         let mut new_input_mode = &app.input_mode;
         let mut clear_found_snippets = false;
         let mut push_current_snippet = false;
-        let mut found_indices = Vec::<usize>::new();
+        // (list idx, snippet idx)
+        let mut found_indices = Vec::<(usize, usize)>::new();
+        let mut delete_snippet = None;
         
         if let Event::Key(key) = event::read()? {
             match app.input_mode {
@@ -127,160 +67,234 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                     match key.code {
                         KeyCode::Char('n') => {
                             new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeName);
-                            app.current_snippet = Some(CodeSnippet::new());
+                            app.current_snippet = Some(CodeSnippet::new(app.return_next_idx()));
                             app.input = String::new();
                         }
                         KeyCode::Char('f') => {
                             new_input_mode = &InputMode::Search;
                             clear_found_snippets = true;
                         }
+                        KeyCode::Char('c') => {
+                            let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                            let selected_snippet = app.found_snippets.state.selected();
+                            if let Some(selected_snip_idx) = selected_snippet {
+                                let snip = &app.found_snippets.items[selected_snip_idx];
+                                ctx.set_contents(snip.code.clone().to_owned()).unwrap();
+                            }
+                        }
+                        KeyCode::Char('x') => {
+                            let selected_snippet = app.found_snippets.state.selected();
+                            if let Some(selected_snip_idx) = selected_snippet {
+                                if app.snippets.len() > 0 {
+                                    let snip = &app.found_snippets.items[selected_snip_idx];
+                                    delete_snippet = Some(snip.idx);
+                                }
+                            }
+                        }
+                        KeyCode::Enter => {
+                            let selected_snippet = app.found_snippets.state.selected();
+                            if let Some(selected_snip_idx) = selected_snippet {
+                                let snip = &app.found_snippets.items[selected_snip_idx];
+                                app.current_snippet = Some(snip.clone());
+                                app.input = snip.tags.join(" ");
+                            }
+                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeName);
+                        }
                         KeyCode::Esc => {
                             return Ok(());
+                        }
+                        KeyCode::Up => {
+                            app.found_snippets.previous();
+                        }
+                        KeyCode::Down => {
+                            app.found_snippets.next();
+                        }
+                        KeyCode::Left => {
+                            app.found_snippets.unselect();
                         }
                         _ => {}
                     };
                 }
                 InputMode::NewSnippet(new_mode) => {
-                    let snip = app.current_snippet.as_mut().unwrap();
-                    let input_field;
-                    match new_mode {
-                        NewSnippetMode::TypeName => {
-                            input_field = &mut snip.name;
-                        },
-                        NewSnippetMode::TypeTags => {
-                            input_field = &mut app.input;
-                        },
-                        NewSnippetMode::TypeCode => {
-                            input_field = &mut snip.code;
-                        },
-                    }
-                    match key.code {
-                        KeyCode::Esc => {
-                            new_input_mode = &InputMode::Normal;
-                        },
-                        KeyCode::Char(c) => {
-                            input_field.push(c);
+                    let snip = app.current_snippet.as_mut();
+                    if let Some(snip) = snip {
+                        let input_field;
+                        match new_mode {
+                            NewSnippetMode::TypeName => {
+                                input_field = &mut snip.name;
+                            },
+                            NewSnippetMode::TypeTags => {
+                                input_field = &mut app.input;
+                            },
+                            NewSnippetMode::TypeCode => {
+                                input_field = &mut snip.code;
+                            },
                         }
-                        KeyCode::Backspace => {
-                            input_field.pop();
-                        },
-                        KeyCode::Enter => {
-                            match new_mode {
-                                NewSnippetMode::TypeName => {
-                                    new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeTags);
-                                },
-                                NewSnippetMode::TypeTags => {
-                                    if let Some(current_snip) = &mut app.current_snippet {
-                                        let tag_split: Vec<&str> = app.input.split(" ").collect();
-                                        let mut new_tags = vec![];
-                                        for t in tag_split {
-                                            new_tags.push(String::from(t));
-                                        };
-                                        current_snip.tags = new_tags;
-                                    }
-                                    new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeCode);
-                                },
-                                NewSnippetMode::TypeCode => {
-                                    if key.modifiers == KeyModifiers::ALT {
-                                        push_current_snippet = true;
-
-                                        new_input_mode = &InputMode::Normal;
-                                        app.input = String::new();
-                                    } else {
-                                        input_field.push('\n');
-                                    }
-                                },
-                            };
-                        }
-                        KeyCode::Tab => {
-                            for _i in 0..4 {
-                                input_field.push(' ');
+                        match key.code {
+                            KeyCode::Esc => {
+                                new_input_mode = &InputMode::Normal;
+                            },
+                            KeyCode::Char(c) => {
+                                input_field.push(c);
                             }
-                        }
-                        KeyCode::BackTab => {
-                            let inp = input_field.clone();
-                            let lines = inp.lines();
-                            if let Some(lastline) = lines.last() {
-                                if lastline.starts_with('\t') {
-                                    input_field.pop();
-                                } else if lastline.ends_with("    ") {
-                                    for _i in 0..4 {
+                            KeyCode::Backspace => {
+                                input_field.pop();
+                            },
+                            KeyCode::Enter => {
+                                match new_mode {
+                                    NewSnippetMode::TypeName => {
+                                        new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeTags);
+                                    },
+                                    NewSnippetMode::TypeTags => {
+                                        if let Some(current_snip) = &mut app.current_snippet {
+                                            let tag_split: Vec<&str> = app.input.split(" ").collect();
+                                            let mut new_tags = vec![];
+                                            for t in tag_split {
+                                                new_tags.push(String::from(t));
+                                            };
+                                            current_snip.tags = new_tags;
+                                        }
+                                        new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeCode);
+                                    },
+                                    NewSnippetMode::TypeCode => {
+                                        if key.modifiers == KeyModifiers::ALT {
+                                            push_current_snippet = true;
+    
+                                            new_input_mode = &InputMode::Normal;
+                                            app.input = String::new();
+                                        } else {
+                                            input_field.push('\n');
+                                        }
+                                    },
+                                };
+                            }
+                            KeyCode::Tab => {
+                                for _i in 0..4 {
+                                    input_field.push(' ');
+                                }
+                            }
+                            KeyCode::BackTab => {
+                                let inp = input_field.clone();
+                                let lines = inp.lines();
+                                if let Some(lastline) = lines.last() {
+                                    if lastline.starts_with('\t') {
                                         input_field.pop();
+                                    } else if lastline.ends_with("    ") {
+                                        for _i in 0..4 {
+                                            input_field.pop();
+                                        }
                                     }
                                 }
                             }
+                            _ => {}
                         }
-                        _ => {}
+                    } else {
+                        new_input_mode = &InputMode::Normal;
                     }
                 },
-                InputMode::Search => match key.code {
-                    KeyCode::Enter => {
-                        new_input_mode = &InputMode::Normal;
-                        found_indices = search_snippets(snippets, &app.input);
-                    }
-                    KeyCode::Char(c) => {
-                        app.input.push(c);
-                        found_indices = search_snippets(snippets, &app.input);
-                    }
-                    KeyCode::Backspace => {
-                        app.input.pop();
-                        if app.input.is_empty() {
-                            app.found_snippets = vec![];
-                        } else {
+                InputMode::Search => {
+                    let snippets: &mut Vec<CodeSnippet> = &mut app.snippets;
+                    match key.code {
+                        KeyCode::Enter => {
+                            new_input_mode = &InputMode::Normal;
                             found_indices = search_snippets(snippets, &app.input);
-                        };
+                        }
+                        KeyCode::Char(c) => {
+                            app.input.push(c);
+                            found_indices = search_snippets(snippets, &app.input);
+                        }
+                        KeyCode::Backspace => {
+                            app.input.pop();
+                            if app.input.is_empty() {
+                                app.found_snippets.items = vec![];
+                            } else {
+                                found_indices = search_snippets(snippets, &app.input);
+                            };
+                        }
+                        KeyCode::Esc => {
+                            return Ok(());
+                        }
+                        KeyCode::Up => {
+                            app.found_snippets.previous();
+                        }
+                        KeyCode::Down => {
+                            app.found_snippets.next();
+                        }
+                        KeyCode::Left => {
+                            app.found_snippets.unselect();
+                        }
+                        _ => (),
                     }
-                    KeyCode::Esc => {
-                        return Ok(());
-                    }
-                    _ => (),
                 },
             }
         };
         if clear_found_snippets {
-            app.found_snippets = vec![];
+            app.found_snippets.items = vec![];
         };
         app.input_mode = new_input_mode.to_owned();
-        
-        for idx in found_indices {
-            let snip = &mut snippets[idx];
-            if !app.found_snippets.contains(&&*snip) {
-                app.found_snippets.push(snip.clone());
-            }
-        }
+
+
         if push_current_snippet {
             // Save current snippet
             if let Some(current_snip) = app.current_snippet.clone() {
-                snippets.push(current_snip);
+                // If currently editing an existing snippet
+                if app.has_snippet_with_idx(current_snip.idx) {
+                    app.remove_snippet(current_snip.idx);
+                };
+                app.snippets.push(current_snip);
             };
             app.current_snippet = None;
+            found_indices = search_snippets(&mut app.snippets, &app.input);
+        };
+
+        // Call to delete a snippet
+        if let Some(deletion_idx) = delete_snippet {
+            app.remove_snippet(deletion_idx);
+            let mut remove_idx_in_found = None;
+            for (i, found) in found_indices.iter().enumerate() {
+                if found.1 == deletion_idx {
+                    remove_idx_in_found = Some(i);
+                }
+            };
+            if let Some(remove_idx_in_found) = remove_idx_in_found {
+                found_indices.remove(remove_idx_in_found);
+            }
         };
         
+        if app.input_mode == InputMode::Normal {
+            found_indices = search_snippets(&mut app.snippets, &"".to_string())
+        };
+        app.found_snippets.items.clear();
+        for idx in found_indices.iter() {
+            let snip = &mut app.snippets[idx.0];
+            if !app.found_snippets.items.contains(&&*snip) {
+                app.found_snippets.items.push(snip.clone());
+            }
+        }
         
-        terminal.draw(|f| ui(f, &app))?;
-        
+        terminal.draw(|f| ui(f, &mut app))?;
     }
 }
 
 
 
-fn search_snippets<'a>(snippets: &'a mut Vec<CodeSnippet>, input: &String) -> Vec<usize> {
-    let mut indices = Vec::<usize>::new();
+fn search_snippets<'a>(snippets: &'a mut Vec<CodeSnippet>, input: &String) -> Vec<(usize, usize)> {
+    let mut indices = Vec::<(usize, usize)>::new();
+    let input_lower = input.to_lowercase();
     for (snippet_idx, snippet) in snippets.iter().enumerate() {
         for tag in snippet.tags.iter() {
-            if tag.contains(input.as_str()) && !indices.contains(&snippet_idx) {
-                indices.push(snippet_idx);
+            let name_lower = snippet.name.to_lowercase();
+            let tag_lower = tag.to_lowercase();
+            if (tag_lower.contains(input_lower.as_str()) || name_lower.contains(input_lower.as_str())) && !indices.contains(&(snippet_idx, snippet.idx)) {
+                indices.push((snippet_idx, snippet.idx));
             };
         };
-        if snippet.name.contains(input.as_str()) && !indices.contains(&snippet_idx) {
-            indices.push(snippet_idx);
-        }
     };
     indices
 }
 
 
-fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
+fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(2)
@@ -322,18 +336,37 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &App) {
             // Draw Search field
             input_field(f, &String::from(title), t_color, &app.input, true, &search_chunk);
             
-            // Draw found snippets list
-            let snippet_list: Vec<ListItem> = app.found_snippets
+            let unselected_text_style = Style::default()
+                .add_modifier(Modifier::UNDERLINED);
+            let unselected_style = Style::default()
+                .bg(Color::Rgb(32, 33, 38));
+            
+            let selected_style = Style::default()
+                .add_modifier(Modifier::UNDERLINED)
+                .add_modifier(Modifier::BOLD)
+                .bg(Color::Rgb(60, 63, 71));
+            
+            let items: Vec<ListItem> = app
+                .found_snippets
+                .items
                 .iter()
-                .enumerate()
-                .map(|(_, m)| {
-                    let content = vec![Spans::from(Span::raw(format!("{}", m.name)))];
-                    ListItem::new(content)
+                .map(|snip| {
+                    let mut lines = vec![Spans::from(Span::styled(
+                        format!("{}, Tags: [{}], Idx: {}", snip.name, snip.tags.join(" "), snip.idx),
+                        unselected_text_style,
+                    ))];
+                    ListItem::new(lines).style(unselected_style)
                 })
                 .collect();
-            let found_snippets =
-                List::new(snippet_list).block(Block::default().borders(Borders::ALL).title("Snippets"));
-            f.render_widget(found_snippets, found_chunk);
+
+            // Create a List from all list items and highlight the currently selected one
+            let items = List::new(items)
+                .block(Block::default().borders(Borders::ALL).title("List"))
+                .highlight_style(selected_style)
+                .highlight_symbol(">> ");
+
+            // We can now render the item list
+            f.render_stateful_widget(items, found_chunk, &mut app.found_snippets.state);
         },
         InputMode::NewSnippet(new_mode) => {
             let block = Block::default()
