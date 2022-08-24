@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -18,6 +20,7 @@ use clipboard::ClipboardContext;
 
 use Snippy::{app::{App, InputMode, NewSnippetMode}, snippet::CodeSnippet};
 
+const ORANGE: Color = Color::Rgb(252, 141, 0);
 
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -52,7 +55,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Result<()> {
     loop {
-        terminal.draw(|f| ui(f, &mut app))?;
+        //terminal.draw(|f| ui(f, &mut app))?;
         
         let mut new_input_mode = &app.input_mode;
         let mut clear_found_snippets = false;
@@ -85,7 +88,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                         KeyCode::Char('x') => {
                             let selected_snippet = app.found_snippets.state.selected();
                             if let Some(selected_snip_idx) = selected_snippet {
-                                if app.snippets.len() > 0 {
+                                if !app.snippets.is_empty() {
                                     let snip = &app.found_snippets.items[selected_snip_idx];
                                     delete_snippet = Some(snip.idx);
                                 }
@@ -118,18 +121,17 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                 InputMode::NewSnippet(new_mode) => {
                     let snip = app.current_snippet.as_mut();
                     if let Some(snip) = snip {
-                        let input_field;
-                        match new_mode {
+                        let input_field = match new_mode {
                             NewSnippetMode::TypeName => {
-                                input_field = &mut snip.name;
+                                &mut snip.name
                             },
                             NewSnippetMode::TypeTags => {
-                                input_field = &mut app.input;
+                                &mut app.input
                             },
                             NewSnippetMode::TypeCode => {
-                                input_field = &mut snip.code;
+                                &mut snip.code
                             },
-                        }
+                        };
                         match key.code {
                             KeyCode::Esc => {
                                 new_input_mode = &InputMode::Normal;
@@ -147,7 +149,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                     },
                                     NewSnippetMode::TypeTags => {
                                         if let Some(current_snip) = &mut app.current_snippet {
-                                            let tag_split: Vec<&str> = app.input.split(" ").collect();
+                                            let tag_split: Vec<&str> = app.input.split(' ').collect();
                                             let mut new_tags = vec![];
                                             for t in tag_split {
                                                 new_tags.push(String::from(t));
@@ -262,30 +264,31 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
         };
         
         if app.input_mode == InputMode::Normal {
-            found_indices = search_snippets(&mut app.snippets, &"".to_string())
+            found_indices = search_snippets(&mut app.snippets, "")
         };
         app.found_snippets.items.clear();
         for idx in found_indices.iter() {
             let snip = &mut app.snippets[idx.0];
-            if !app.found_snippets.items.contains(&&*snip) {
+            if !app.found_snippets.items.contains(&*snip) {
                 app.found_snippets.items.push(snip.clone());
             }
         }
         
-        terminal.draw(|f| ui(f, &mut app))?;
+        terminal.draw(|f| ui(f, app))?;
     }
 }
 
 
 
-fn search_snippets<'a>(snippets: &'a mut Vec<CodeSnippet>, input: &String) -> Vec<(usize, usize)> {
+fn search_snippets(snippets: &'_ mut [CodeSnippet], input: &str) -> Vec<(usize, usize)> {
     let mut indices = Vec::<(usize, usize)>::new();
     let input_lower = input.to_lowercase();
+    let input_lower = input_lower.as_str();
     for (snippet_idx, snippet) in snippets.iter().enumerate() {
         for tag in snippet.tags.iter() {
             let name_lower = snippet.name.to_lowercase();
             let tag_lower = tag.to_lowercase();
-            if (tag_lower.contains(input_lower.as_str()) || name_lower.contains(input_lower.as_str())) && !indices.contains(&(snippet_idx, snippet.idx)) {
+            if (tag_lower.contains(input_lower) || name_lower.contains(input_lower)) && !indices.contains(&(snippet_idx, snippet.idx)) {
                 indices.push((snippet_idx, snippet.idx));
             };
         };
@@ -300,7 +303,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         .margin(2)
         .constraints(
             [
-                Constraint::Length(1), // Title
+                Constraint::Length(6), // Title
                 Constraint::Length(1), // Just a bit of space
                 Constraint::Length(3), // Search field
                 Constraint::Max(2), // Found snippets field
@@ -312,26 +315,43 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     let search_chunk = chunks[2];
     let found_chunk = chunks[3];
 
-
+    
+    let keybinds_style = Style::default();
     let snippy_title = vec![
-        Span::styled("Snippy", Style::default()
-            .add_modifier(Modifier::BOLD)
-            .add_modifier(Modifier::UNDERLINED)
-            .fg(Color::Rgb(252, 141, 0))
+        Spans::from(
+            Span::styled("Snippy", Style::default()
+                .add_modifier(Modifier::BOLD)
+                .add_modifier(Modifier::UNDERLINED)
+                .fg(ORANGE)
+            )
         ),
-        Span::raw("  Press ESC to quit"),
+        Spans::from(
+            Span::styled("Shortcuts:", Style::default()),
+        ),
+        Spans::from(
+            vec![Span::styled("    - ESC", keybinds_style), Span::styled(" to quit", Style::default())]
+        ),
+        Spans::from(
+            vec![Span::styled("    - f", keybinds_style), Span::styled(" to search", Style::default())]
+        ),
+        Spans::from(
+            vec![Span::styled("    - c", keybinds_style), Span::styled(" to copy the selected snippet", Style::default())]
+        ),
+        Spans::from(
+            vec![Span::styled("    - x", keybinds_style), Span::styled(" to delete the selected snippet", Style::default())]
+        ),
     ];
-    let snippy_text = Text::from(Spans::from(snippy_title));
+    let snippy_text = Text::from(snippy_title);
     let app_title = Paragraph::new(snippy_text);
     f.render_widget(app_title, title_chunk);
 
     match app.input_mode {
         InputMode::Normal | InputMode::Search => {
             let (mut title, mut t_color) = ("Normal Mode - Press 'f' to search for snippets, 'n' to create a new Snippet", Color::White);
-            match app.input_mode {
-                InputMode::Search => (title, t_color) = ("Search Mode - Press Enter to go back to Normal Mode", Color::Yellow),
-                _ => (),
-            };
+            if app.input_mode == InputMode::Search {
+                (title, t_color) = ("Search Mode - Press Enter to go back to Normal Mode", Color::Yellow);
+            }
+                
             
             // Draw Search field
             input_field(f, &String::from(title), t_color, &app.input, true, &search_chunk);
@@ -351,8 +371,8 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
                 .items
                 .iter()
                 .map(|snip| {
-                    let mut lines = vec![Spans::from(Span::styled(
-                        format!("{}, Tags: [{}], Idx: {}", snip.name, snip.tags.join(" "), snip.idx),
+                    let lines = vec![Spans::from(Span::styled(
+                        format!("{}, Tags: [{}]", snip.name, snip.tags.join(", ")),
                         unselected_text_style,
                     ))];
                     ListItem::new(lines).style(unselected_style)
@@ -361,7 +381,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
 
             // Create a List from all list items and highlight the currently selected one
             let items = List::new(items)
-                .block(Block::default().borders(Borders::ALL).title("List"))
+                .block(Block::default().borders(Borders::ALL).title(Span::styled("Snippets", Style::default().add_modifier(Modifier::BOLD))))
                 .highlight_style(selected_style)
                 .highlight_symbol(">> ");
 
@@ -413,11 +433,12 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
 
 
 
-fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: Color, input: &String, set_cursor: bool, render_area: &Rect) {
+fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: Color, input: &str, set_cursor: bool, render_area: &Rect) {
     let txt = Span::styled(input_title, Style::default()
         .fg(title_color)
+        .add_modifier(Modifier::BOLD)
     );
-    let input_para = Paragraph::new(input.as_ref())
+    let input_para = Paragraph::new(input)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title(Spans::from(txt)));
     f.render_widget(input_para, *render_area);

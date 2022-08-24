@@ -66,25 +66,25 @@ impl Default for App {
             example_snippet3.tags = vec!["example".to_string(), "bro".to_string()];
         app.snippets.push(example_snippet3);
         
-        return app;
+        app
     }
 }
 
 impl App {
     /// Immutable version of return_next_index
     pub fn get_next_idx(&self) -> usize {
-        if self.snippets.len() > 0 && self.open_idxs.len() > 0 {
-            return *self.open_idxs.front().unwrap();
+        if !self.snippets.is_empty() && !self.open_idxs.is_empty() {
+            *self.open_idxs.front().unwrap()
         } else {
-            return self.snippets.len();
+            self.snippets.len()
         }
     }
     /// Mutable version of get_next_idx
     pub fn return_next_idx(&mut self) -> usize {
-        if self.snippets.len() > 0 && self.open_idxs.len() > 0 {
-            return self.open_idxs.pop_front().unwrap();
+        if !self.snippets.is_empty() && !self.open_idxs.is_empty() {
+            self.open_idxs.pop_front().unwrap()
         } else {
-            return self.snippets.len();
+            self.snippets.len()
         }
     }
 
