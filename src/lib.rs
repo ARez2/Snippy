@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use tui::widgets::ListState;
 pub mod snippet;
 pub mod app;

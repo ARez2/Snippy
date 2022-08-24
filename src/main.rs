@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
@@ -18,7 +16,7 @@ extern crate clipboard;
 use clipboard::ClipboardProvider;
 use clipboard::ClipboardContext;
 
-use Snippy::{app::{App, InputMode, NewSnippetMode}, snippet::CodeSnippet};
+use snippy::{app::{App, InputMode, NewSnippetMode}, snippet::CodeSnippet};
 
 const ORANGE: Color = Color::Rgb(252, 141, 0);
 
