@@ -238,7 +238,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                             };
                         }
                         KeyCode::Esc => {
-                            return Ok(());
+                            new_input_mode = InputMode::Normal;
                         }
                         KeyCode::Up => {
                             app.found_snippets.previous();
@@ -389,7 +389,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
         InputMode::Normal | InputMode::Search => {
             let (mut title, mut t_color) = ("Normal Mode - Press f to go into Search Mode", Color::White);
             if app.input_mode == InputMode::Search {
-                (title, t_color) = ("Search Mode - Press Enter to go back to Normal Mode", Color::Yellow);
+                (title, t_color) = ("Search Mode - Press ESC to go back to Normal Mode", Color::Yellow);
             }
                 
             
