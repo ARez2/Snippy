@@ -80,7 +80,7 @@ fn load_app_state() -> App {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Result<()> {
     loop {
-        let mut new_input_mode = &app.input_mode;
+        let mut new_input_mode = app.input_mode.clone();
         let mut clear_found_snippets = false;
         let mut push_current_snippet = false;
         // (list idx, snippet idx)
@@ -92,12 +92,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                 InputMode::Normal => {
                     match key.code {
                         KeyCode::Char('n') => {
-                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeName);
+                            new_input_mode = InputMode::NewSnippet(NewSnippetMode::TypeName);
                             app.current_snippet = Some(CodeSnippet::new(app.return_next_idx()));
                             app.input = String::new();
                         }
                         KeyCode::Char('f') => {
-                            new_input_mode = &InputMode::Search;
+                            new_input_mode = InputMode::Search;
                             clear_found_snippets = true;
                         }
                         KeyCode::Char('c') => {
@@ -118,13 +118,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                             }
                         }
                         KeyCode::Enter => {
-                            let selected_snippet = app.found_snippets.state.selected();
-                            if let Some(selected_snip_idx) = selected_snippet {
-                                let snip = &app.found_snippets.items[selected_snip_idx];
-                                app.current_snippet = Some(snip.clone());
-                                app.input = snip.tags.join(" ");
-                                new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeName);
-                            }
+                            new_input_mode = select_snippet_from_list(&mut app, new_input_mode);
                         }
                         KeyCode::Esc => {
                             return Ok(());
@@ -169,12 +163,12 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                         if !did_paste_something {
                             match key.code {
                                 KeyCode::Esc => {
-                                    new_input_mode = &InputMode::Normal;
+                                    new_input_mode = InputMode::Normal;
                                 },
                                 KeyCode::Char(c) => {
                                     if c == 's' && key.modifiers == KeyModifiers::CONTROL {
                                         push_current_snippet = true;
-                                        new_input_mode = &InputMode::Normal;
+                                        new_input_mode = InputMode::Normal;
                                         app.input = String::new();
                                     } else {
                                         input_field.push(c);
@@ -186,7 +180,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                 KeyCode::Enter => {
                                     match new_mode {
                                         NewSnippetMode::TypeName => {
-                                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeTags);
+                                            new_input_mode = InputMode::NewSnippet(NewSnippetMode::TypeTags);
                                         },
                                         NewSnippetMode::TypeTags => {
                                             if let Some(current_snip) = &mut app.current_snippet {
@@ -197,7 +191,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                                 };
                                                 current_snip.tags = new_tags;
                                             }
-                                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeCode);
+                                            new_input_mode = InputMode::NewSnippet(NewSnippetMode::TypeCode);
                                         },
                                         NewSnippetMode::TypeCode => {
                                             input_field.push('\n');
@@ -226,26 +220,21 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                             }
                         };
                     } else {
-                        new_input_mode = &InputMode::Normal;
+                        new_input_mode = InputMode::Normal;
                     }
                 },
                 InputMode::Search => {
-                    let snippets: &mut Vec<CodeSnippet> = &mut app.snippets;
                     match key.code {
                         KeyCode::Enter => {
-                            new_input_mode = &InputMode::Normal;
-                            found_indices = search_snippets(snippets, &app.input);
+                            new_input_mode = select_snippet_from_list(&mut app, new_input_mode);
                         }
                         KeyCode::Char(c) => {
                             app.input.push(c);
-                            found_indices = search_snippets(snippets, &app.input);
                         }
                         KeyCode::Backspace => {
                             app.input.pop();
                             if app.input.is_empty() {
                                 app.found_snippets.items = vec![];
-                            } else {
-                                found_indices = search_snippets(snippets, &app.input);
                             };
                         }
                         KeyCode::Esc => {
@@ -261,7 +250,10 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                             app.found_snippets.unselect();
                         }
                         _ => (),
-                    }
+                    };
+                    if !app.input.is_empty() {
+                        found_indices = search_snippets(&mut app.snippets, &app.input);
+                    };
                 },
             }
         };
@@ -329,6 +321,18 @@ fn search_snippets(snippets: &'_ mut [CodeSnippet], input: &str) -> Vec<(usize, 
         };
     };
     indices
+}
+
+fn select_snippet_from_list<'a>(app: &mut App, cur_input_mode: InputMode) -> InputMode {
+    let selected_snippet = app.found_snippets.state.selected();
+    let mut new_input_mode = cur_input_mode;
+    if let Some(selected_snip_idx) = selected_snippet {
+        let snip = &app.found_snippets.items[selected_snip_idx];
+        app.current_snippet = Some(snip.clone());
+        app.input = snip.tags.join(" ");
+        new_input_mode = InputMode::NewSnippet(NewSnippetMode::TypeName);
+    };
+    new_input_mode
 }
 
 
