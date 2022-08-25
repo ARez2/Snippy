@@ -1,5 +1,4 @@
 use tui::widgets::ListState;
-use serde_derive::{Serialize, Deserialize};
 pub mod snippet;
 pub mod app;
 

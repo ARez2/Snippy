@@ -1,21 +1,20 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, *},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::{error::Error, io, fs};
+use std::{error::Error, io};
 use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect, Margin},
     style::{Color, Modifier, Style},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType, ListState},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType},
     Frame, Terminal,
 };
 use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
-use serde_json;
 extern crate clipboard;
 use clipboard::ClipboardProvider;
 use clipboard::ClipboardContext;
@@ -50,7 +49,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     execute!(
         terminal.backend_mut(),
         LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableMouseCapture,
+        EnableBracketedPaste
     )?;
     terminal.show_cursor()?;
 
@@ -80,8 +80,6 @@ fn load_app_state() -> App {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Result<()> {
     loop {
-        //terminal.draw(|f| ui(f, &mut app))?;
-        
         let mut new_input_mode = &app.input_mode;
         let mut clear_found_snippets = false;
         let mut push_current_snippet = false;
@@ -125,8 +123,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                 let snip = &app.found_snippets.items[selected_snip_idx];
                                 app.current_snippet = Some(snip.clone());
                                 app.input = snip.tags.join(" ");
+                                new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeName);
                             }
-                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeName);
                         }
                         KeyCode::Esc => {
                             return Ok(());
@@ -157,64 +155,77 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                 &mut snip.code
                             },
                         };
-                        match key.code {
-                            KeyCode::Esc => {
-                                new_input_mode = &InputMode::Normal;
-                            },
-                            KeyCode::Char(c) => {
-                                input_field.push(c);
-                            }
-                            KeyCode::Backspace => {
-                                input_field.pop();
-                            },
-                            KeyCode::Enter => {
-                                match new_mode {
-                                    NewSnippetMode::TypeName => {
-                                        new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeTags);
-                                    },
-                                    NewSnippetMode::TypeTags => {
-                                        if let Some(current_snip) = &mut app.current_snippet {
-                                            let tag_split: Vec<&str> = app.input.split(' ').collect();
-                                            let mut new_tags = vec![];
-                                            for t in tag_split {
-                                                new_tags.push(String::from(t));
-                                            };
-                                            current_snip.tags = new_tags;
-                                        }
-                                        new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeCode);
-                                    },
-                                    NewSnippetMode::TypeCode => {
-                                        if key.modifiers == KeyModifiers::ALT {
-                                            push_current_snippet = true;
-    
-                                            new_input_mode = &InputMode::Normal;
-                                            app.input = String::new();
-                                        } else {
-                                            input_field.push('\n');
-                                        }
-                                    },
-                                };
-                            }
-                            KeyCode::Tab => {
-                                for _i in 0..4 {
-                                    input_field.push(' ');
+                        let mut did_paste_something = false;
+                        let paste_key = KeyEvent::new(KeyCode::Char('v'), KeyModifiers::CONTROL);
+                        if key == paste_key {
+                            did_paste_something = true;
+                            let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                            let paste_content = ctx.get_contents().ok();
+                            if let Some(paste_content) = paste_content {
+                                input_field.push_str(paste_content.as_str());
+                            };
+                        };
+
+                        if !did_paste_something {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    new_input_mode = &InputMode::Normal;
+                                },
+                                KeyCode::Char(c) => {
+                                    input_field.push(c);
                                 }
-                            }
-                            KeyCode::BackTab => {
-                                let inp = input_field.clone();
-                                let lines = inp.lines();
-                                if let Some(lastline) = lines.last() {
-                                    if lastline.starts_with('\t') {
-                                        input_field.pop();
-                                    } else if lastline.ends_with("    ") {
-                                        for _i in 0..4 {
+                                KeyCode::Backspace => {
+                                    input_field.pop();
+                                },
+                                KeyCode::Enter => {
+                                    match new_mode {
+                                        NewSnippetMode::TypeName => {
+                                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeTags);
+                                        },
+                                        NewSnippetMode::TypeTags => {
+                                            if let Some(current_snip) = &mut app.current_snippet {
+                                                let tag_split: Vec<&str> = app.input.split(' ').collect();
+                                                let mut new_tags = vec![];
+                                                for t in tag_split {
+                                                    new_tags.push(String::from(t));
+                                                };
+                                                current_snip.tags = new_tags;
+                                            }
+                                            new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeCode);
+                                        },
+                                        NewSnippetMode::TypeCode => {
+                                            if key.modifiers == KeyModifiers::ALT {
+                                                push_current_snippet = true;
+        
+                                                new_input_mode = &InputMode::Normal;
+                                                app.input = String::new();
+                                            } else {
+                                                input_field.push('\n');
+                                            }
+                                        },
+                                    };
+                                }
+                                KeyCode::Tab => {
+                                    for _i in 0..4 {
+                                        input_field.push(' ');
+                                    }
+                                }
+                                KeyCode::BackTab => {
+                                    let inp = input_field.clone();
+                                    let lines = inp.lines();
+                                    if let Some(lastline) = lines.last() {
+                                        if lastline.starts_with('\t') {
                                             input_field.pop();
+                                        } else if lastline.ends_with("    ") {
+                                            for _i in 0..4 {
+                                                input_field.pop();
+                                            }
                                         }
                                     }
                                 }
+                                _ => {}
                             }
-                            _ => {}
-                        }
+                        };
                     } else {
                         new_input_mode = &InputMode::Normal;
                     }
@@ -272,6 +283,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
             };
             app.current_snippet = None;
             found_indices = search_snippets(&mut app.snippets, &app.input);
+            save_app_state(app);
         };
 
         // Call to delete a snippet
@@ -285,7 +297,8 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
             };
             if let Some(remove_idx_in_found) = remove_idx_in_found {
                 found_indices.remove(remove_idx_in_found);
-            }
+            };
+            save_app_state(app);
         };
         
         if app.input_mode == InputMode::Normal {
@@ -460,24 +473,36 @@ fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: 
         .fg(title_color)
         .add_modifier(Modifier::BOLD)
     );
-    let input_para = Paragraph::new(input)
+    let mut input_para = Paragraph::new(input)
         .style(Style::default())
         .block(Block::default().borders(Borders::ALL).title(Spans::from(txt)));
+    
+    let mut len_measure = input.len();
+    let lines = input.split('\n');
+    let mut line_count = lines.clone().count() as u16;
+    line_count = std::cmp::max(line_count, 1);
+    let offset = 3;
+    let mut did_scroll = false;
+    if line_count > render_area.height - 2 {
+        let scoll_amt = (line_count + offset) - render_area.height;
+        input_para = input_para.scroll((scoll_amt as u16, 0));
+        did_scroll = true;
+    }
     f.render_widget(input_para, *render_area);
     if set_cursor {
-        let mut len_measure = input.len();
-        let lines = input.split('\n');
-        let mut line_count = lines.clone().count() as u16;
-        line_count = std::cmp::max(line_count, 1);
         if let Some(last_line) = lines.last() {
             len_measure = last_line.len();
             if last_line.ends_with('\n') {
                 line_count += 1;
             }
         }
+        let mut y_val = render_area.y + line_count as u16;
+        if did_scroll {
+            y_val = render_area.y + render_area.height - offset;
+        }
         f.set_cursor(
             render_area.x + len_measure as u16 + 1,
-            render_area.y + line_count as u16,
+            y_val,
         );
     }
 }
