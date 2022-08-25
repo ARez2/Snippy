@@ -172,7 +172,13 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                     new_input_mode = &InputMode::Normal;
                                 },
                                 KeyCode::Char(c) => {
-                                    input_field.push(c);
+                                    if c == 's' && key.modifiers == KeyModifiers::CONTROL {
+                                        push_current_snippet = true;
+                                        new_input_mode = &InputMode::Normal;
+                                        app.input = String::new();
+                                    } else {
+                                        input_field.push(c);
+                                    }
                                 }
                                 KeyCode::Backspace => {
                                     input_field.pop();
@@ -194,14 +200,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                                             new_input_mode = &InputMode::NewSnippet(NewSnippetMode::TypeCode);
                                         },
                                         NewSnippetMode::TypeCode => {
-                                            if key.modifiers == KeyModifiers::ALT {
-                                                push_current_snippet = true;
-        
-                                                new_input_mode = &InputMode::Normal;
-                                                app.input = String::new();
-                                            } else {
-                                                input_field.push('\n');
-                                            }
+                                            input_field.push('\n');
                                         },
                                     };
                                 }
@@ -457,7 +456,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
                 let texts = [
                     String::from("Name of the Snippet"),
                     String::from("Tags (separate by space)"),
-                    String::from("Code of the Snippet (press ALT-Enter to continue)"),
+                    String::from("Code of the Snippet (press CTRL-S to save the snippet)"),
                 ];
                 input_field(f, &texts[0], Color::DarkGray, &current_snippet.name,new_mode==NewSnippetMode::TypeName, &name_chunk);
                 input_field(f, &texts[1], Color::DarkGray, &app.input, new_mode==NewSnippetMode::TypeTags, &tags_chunk);
