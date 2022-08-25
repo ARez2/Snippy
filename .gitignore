@@ -13,3 +13,6 @@ Cargo.lock
 # Added by cargo
 
 /target
+
+# Ignore Save States and other Snippy files
+*.snippy

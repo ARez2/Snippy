@@ -1,4 +1,5 @@
 use tui::widgets::ListState;
+use serde_derive::{Serialize, Deserialize};
 pub mod snippet;
 pub mod app;
 
@@ -50,5 +51,14 @@ impl<T> StatefulList<T> {
 
     pub fn unselect(&mut self) {
         self.state.select(None);
+    }
+}
+
+impl<T> Default for StatefulList<T> {
+    fn default() -> Self {
+        StatefulList {
+            state: ListState::default(),
+            items: Vec::<T>::new(),
+        }
     }
 }

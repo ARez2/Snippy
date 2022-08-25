@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-
+use serde_derive::{Serialize, Deserialize};
 use crate::{snippet::CodeSnippet, StatefulList};
 
 
@@ -18,18 +18,33 @@ pub enum InputMode {
     NewSnippet(NewSnippetMode),
 }
 
+impl Default for InputMode {
+    fn default() -> Self {
+        InputMode::Search
+    }
+}
+
+
 /// App holds the state of the application
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct App {
+    #[serde(skip_serializing, skip_deserializing)]
     pub input: String,
+    #[serde(skip_serializing, skip_deserializing)]
     pub input_mode: InputMode,
+    
     pub snippets: Vec<CodeSnippet>,
+    
     // When deleting an element from the middle of the snippet list
     // this idx becomes open and the next new snippet will get that idx
     pub open_idxs: VecDeque<usize>,
+    
     /// Found snippets displayed when searching
+    #[serde(skip_serializing, skip_deserializing)]
     pub found_snippets: StatefulList<CodeSnippet>,
+    
     // Currently edited snippet
+    #[serde(skip_serializing, skip_deserializing)]
     pub current_snippet: Option<CodeSnippet>,
 }
 

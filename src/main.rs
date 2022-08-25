@@ -3,7 +3,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::{error::Error, io};
+use std::{error::Error, io, fs};
 use tui::{
     backend::{Backend, CrosstermBackend},
     layout::{Constraint, Direction, Layout, Rect, Margin},
@@ -12,6 +12,10 @@ use tui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType, ListState},
     Frame, Terminal,
 };
+use std::fs::File;
+use std::io::prelude::*;
+use std::path::Path;
+use serde_json;
 extern crate clipboard;
 use clipboard::ClipboardProvider;
 use clipboard::ClipboardContext;
@@ -19,7 +23,7 @@ use clipboard::ClipboardContext;
 use snippy::{app::{App, InputMode, NewSnippetMode}, snippet::CodeSnippet};
 
 const ORANGE: Color = Color::Rgb(252, 141, 0);
-
+const SAVEFILE_PATH: &str = "savestate.snippy";
 
 fn main() -> Result<(), Box<dyn Error>> {
     // setup terminal
@@ -28,12 +32,18 @@ fn main() -> Result<(), Box<dyn Error>> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    // Try out this: terminal.show_cursor()?;
 
-    // create app and run it
-    let mut app = App::default();
-    app.found_snippets.state = ListState::default();
+    // load the app state from the save file if that exists, else create new App
+    let mut app = match Path::new(SAVEFILE_PATH).exists() {
+        true => {
+            load_app_state()
+        },
+        false => {
+            App::default()
+        },
+    };
     let res = run_app(&mut terminal, &mut app);
+    save_app_state(&app);
 
     // restore terminal
     disable_raw_mode()?;
@@ -50,6 +60,23 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+
+fn save_app_state(app: &App) {
+    let app_serialized = serde_json::to_string(app).unwrap();
+    let mut file = File::create(SAVEFILE_PATH).unwrap();
+    file.write_all(app_serialized.as_bytes()).unwrap();
+}
+
+fn load_app_state() -> App {
+    let mut file = File::open(SAVEFILE_PATH).unwrap();
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).unwrap();
+    let app_deserialized : App = serde_json::from_str(contents.as_str()).unwrap();
+    app_deserialized
+}
+
+
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Result<()> {
     loop {
@@ -276,8 +303,6 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
     }
 }
 
-
-
 fn search_snippets(snippets: &'_ mut [CodeSnippet], input: &str) -> Vec<(usize, usize)> {
     let mut indices = Vec::<(usize, usize)>::new();
     let input_lower = input.to_lowercase();
@@ -293,6 +318,7 @@ fn search_snippets(snippets: &'_ mut [CodeSnippet], input: &str) -> Vec<(usize, 
     };
     indices
 }
+
 
 
 fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
@@ -345,7 +371,7 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
 
     match app.input_mode {
         InputMode::Normal | InputMode::Search => {
-            let (mut title, mut t_color) = ("Normal Mode - Press 'f' to search for snippets, 'n' to create a new Snippet", Color::White);
+            let (mut title, mut t_color) = ("Normal Mode - Press f to go into Search Mode", Color::White);
             if app.input_mode == InputMode::Search {
                 (title, t_color) = ("Search Mode - Press Enter to go back to Normal Mode", Color::Yellow);
             }
@@ -429,8 +455,6 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
     
 }
 
-
-
 fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: Color, input: &str, set_cursor: bool, render_area: &Rect) {
     let txt = Span::styled(input_title, Style::default()
         .fg(title_color)
@@ -457,8 +481,6 @@ fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: 
         );
     }
 }
-
-
 
 /// helper function to create a centered rect using up certain percentage of the available rect `r`
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

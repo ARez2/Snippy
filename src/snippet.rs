@@ -1,6 +1,7 @@
+use serde_derive::{Serialize, Deserialize};
 
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeSnippet {
     pub tags: Vec<String>,
     pub name: String,
