@@ -6,10 +6,10 @@ use crossterm::{
 use std::{error::Error, io};
 use tui::{
     backend::{Backend, CrosstermBackend},
-    layout::{Constraint, Direction, Layout, Rect, Margin},
+    layout::{Constraint, Direction, Layout, Rect, Margin, Alignment},
     style::{Color, Modifier, Style},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Clear, BorderType, Wrap},
     Frame, Terminal,
 };
 use std::fs::File;
@@ -113,7 +113,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                             if let Some(selected_snip_idx) = selected_snippet {
                                 if !app.snippets.is_empty() {
                                     let snip = &app.found_snippets.items[selected_snip_idx];
-                                    delete_snippet = Some(snip.idx);
+                                    new_input_mode = InputMode::ConfirmDelete(snip.idx);
                                 }
                             }
                         }
@@ -255,6 +255,18 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App) -> io::Res
                         found_indices = search_snippets(&mut app.snippets, &app.input);
                     };
                 },
+                InputMode::ConfirmDelete(idx) => {
+                    match key.code {
+                        KeyCode::Char('y') => {
+                            delete_snippet = Some(idx);
+                            new_input_mode = InputMode::Normal;
+                        },
+                        KeyCode::Char('n') => {
+                            new_input_mode = InputMode::Normal;
+                        },
+                        _ => (),
+                    }
+                }
             }
         };
         if clear_found_snippets {
@@ -434,12 +446,11 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
                 .borders(Borders::all())
                 .border_style(Style::default().fg(Color::Cyan))
                 .border_type(BorderType::Double);
-            let area = centered_rect(90, 90, f.size());
+            let area = centered_rect(90, 90, true, f.size());
             f.render_widget(Clear, area); //this clears out the background
             f.render_widget(block, area);
             
-            let margin_obj = Margin { vertical: 1, horizontal: 2};
-            let inner_area = area.inner(&margin_obj);
+            let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2});
             let inner_chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .margin(1)
@@ -466,6 +477,50 @@ fn ui<B: Backend>(f: &mut Frame<B>, app: &mut App) {
                 input_field(f, &texts[1], Color::DarkGray, &app.input, new_mode==NewSnippetMode::TypeTags, &tags_chunk);
                 input_field(f, &texts[2], Color::DarkGray, &current_snippet.code, new_mode==NewSnippetMode::TypeCode, &code_chunk);
             };
+        }
+        InputMode::ConfirmDelete(_) => {
+            let block = Block::default()
+                .title("Confirm Deletion of selected Snippet.")
+                .borders(Borders::all())
+                .border_style(Style::default().fg(Color::Red))
+                .border_type(BorderType::Double);
+            let area = centered_rect(35, 8, false, f.size());
+            f.render_widget(Clear, area); //this clears out the background
+            f.render_widget(block, area);
+            
+            let inner_area = area.inner(&Margin { vertical: 1, horizontal: 2});
+            let inner_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints(
+                    [
+                        Constraint::Length(2), // Name Input
+                        Constraint::Length(3), // Tags Input
+                    ]
+                    .as_ref(),
+                )
+                .split(inner_area);
+            let info_text = Spans::from(Span::styled("Do you really want to delete this snippet?", Style::default()));
+            let yes = Spans::from(
+                Span::styled("Yes (y)", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            );
+            let no = Spans::from(
+                Span::styled("No (n)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            );
+            
+            let para1 = Paragraph::new(info_text)
+                .style(Style::default())
+                .alignment(Alignment::Center)
+                .wrap(Wrap{trim: false});
+            f.render_widget(para1, inner_chunks[0]);
+            let yes_para = Paragraph::new(yes)
+                .style(Style::default())
+                .alignment(Alignment::Left);
+            f.render_widget(yes_para, inner_chunks[1]);
+            let no_para = Paragraph::new(no)
+                .style(Style::default())
+                .alignment(Alignment::Right);
+            f.render_widget(no_para, inner_chunks[1]);
         }
     }
     
@@ -511,28 +566,45 @@ fn input_field<B: Backend>(f: &mut Frame<B>, input_title: &String, title_color: 
 }
 
 /// helper function to create a centered rect using up certain percentage of the available rect `r`
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+fn centered_rect(value_x: u16, value_y: u16, mut use_percentage: bool, r: Rect) -> Rect {
+    if value_x > r.width || value_y > r.height {
+        use_percentage = true;
+    };
+    
+    let contraints_y = match use_percentage {
+        true => vec![
+                Constraint::Percentage((100 - value_y) / 2),
+                Constraint::Percentage(value_y),
+                Constraint::Percentage((100 - value_y) / 2)
+            ],
+        false => vec![
+            Constraint::Length((r.height - value_y) / 2),
+            Constraint::Length(value_y),
+            Constraint::Length((r.height - value_y) / 2),
+        ],
+    };
+    
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Percentage((100 - percent_y) / 2),
-                Constraint::Percentage(percent_y),
-                Constraint::Percentage((100 - percent_y) / 2),
-            ]
-            .as_ref(),
-        )
+        .constraints(contraints_y.as_ref())
         .split(r);
 
+    let contraints_x = match use_percentage {
+        true => vec![
+                Constraint::Percentage((100 - value_x) / 2),
+                Constraint::Percentage(value_x),
+                Constraint::Percentage((100 - value_x) / 2)
+            ],
+        false => vec![
+                Constraint::Length((r.width - value_x) / 2),
+                Constraint::Length(value_x),
+                Constraint::Length((r.width - value_x) / 2),
+            ],
+    };
+    
+    
     Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(
-            [
-                Constraint::Percentage((100 - percent_x) / 2),
-                Constraint::Percentage(percent_x),
-                Constraint::Percentage((100 - percent_x) / 2),
-            ]
-            .as_ref(),
-        )
+        .constraints(contraints_x.as_ref())
         .split(popup_layout[1])[1]
 }

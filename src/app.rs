@@ -16,6 +16,7 @@ pub enum InputMode {
     Normal,
     Search,
     NewSnippet(NewSnippetMode),
+    ConfirmDelete(usize),
 }
 
 impl Default for InputMode {
