@@ -9,6 +9,7 @@ Snippy is a command line tool for managing code snippets. Often you want to save
 - Search feature (filter for tags and names, non-case-sensitive)
 - Edit/ delete existing snippets
 - Create new snippets
+- Customizable keybinds via editing the config.snippy file
 
 ![The search feature](/docs/search.png?raw=true)
 ![New snippet](/docs/new.png?raw=true)
