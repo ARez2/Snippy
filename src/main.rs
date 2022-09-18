@@ -22,6 +22,7 @@ use std::path::Path;
 extern crate clipboard;
 use clipboard::ClipboardProvider;
 use clipboard::ClipboardContext;
+use std::env;
 
 use snippy::{app::{App, InputMode, NewSnippetMode}, snippet::CodeSnippet, SnippyConfig};
 
@@ -84,14 +85,24 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
 fn save_app_state(app: &App) {
-    let file = File::create(SAVEFILE_PATH).unwrap();
+    let path = env::current_exe().unwrap();
+    let release_folder = path.parent().unwrap();
+    let target_folder = release_folder.parent().unwrap();
+    let main_folder = target_folder.parent().unwrap();
+    let full_path = main_folder.join(SAVEFILE_PATH);
+    let file = File::create(full_path.to_str().unwrap()).unwrap();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
     let mut ser = serde_json::Serializer::with_formatter(file, formatter);
     app.serialize(&mut ser).unwrap();
 }
 
 fn save_config_state(config: &SnippyConfig) {
-    let file = File::create(CONFIG_PATH).unwrap();
+    let path = env::current_exe().unwrap();
+    let release_folder = path.parent().unwrap();
+    let target_folder = release_folder.parent().unwrap();
+    let main_folder = target_folder.parent().unwrap();
+    let full_path = main_folder.join(CONFIG_PATH);
+    let file = File::create(full_path.to_str().unwrap()).unwrap();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
     let mut ser = serde_json::Serializer::with_formatter(file, formatter);
     config.serialize(&mut ser).unwrap();
@@ -107,11 +118,12 @@ fn load_string_from_file(path: &str) -> String {
 
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App, config: &SnippyConfig) -> io::Result<()> {
-    let k_save = config.keys.get(&"KEY_NEW".to_string()).unwrap();
+    let k_new = config.keys.get(&"KEY_NEW".to_string()).unwrap();
     let k_find = config.keys.get(&"KEY_FIND".to_string()).unwrap();
     let k_copy = config.keys.get(&"KEY_COPY".to_string()).unwrap();
     let k_delete = config.keys.get(&"KEY_DELETE".to_string()).unwrap();
     let k_save = config.keys.get(&"KEY_SAVESNIPPET".to_string()).unwrap();
+    // Editing this is optional
     let k_edit = config.keys.get(&"KEY_EDIT".to_string());
     
     loop {
@@ -125,57 +137,55 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: &mut App, config: &S
         if let Event::Key(key) = event::read()? {
             match app.input_mode {
                 InputMode::Normal => {
-                    match key.code {
-                        KeyCode::Char(k_save) => {
-                            new_input_mode = InputMode::NewSnippet(NewSnippetMode::TypeName);
-                            app.current_snippet = Some(CodeSnippet::new(app.return_next_idx()));
-                            app.input = String::new();
+                    if key.code == KeyCode::Char(*k_new) {
+                        new_input_mode = InputMode::NewSnippet(NewSnippetMode::TypeName);
+                        app.current_snippet = Some(CodeSnippet::new(app.return_next_idx()));
+                        app.input = String::new();
+                    } else if key.code == KeyCode::Char(*k_find) {
+                        new_input_mode = InputMode::Search;
+                        clear_found_snippets = true;
+                    } else if key.code == KeyCode::Char(*k_copy) {
+                        let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+                        let selected_snippet = app.found_snippets.state.selected();
+                        if let Some(selected_snip_idx) = selected_snippet {
+                            let snip = &app.found_snippets.items[selected_snip_idx];
+                            ctx.set_contents(snip.code.clone().to_owned()).unwrap();
                         }
-                        KeyCode::Char(k_find) => {
-                            new_input_mode = InputMode::Search;
-                            clear_found_snippets = true;
-                        }
-                        KeyCode::Char(k_copy) => {
-                            let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
-                            let selected_snippet = app.found_snippets.state.selected();
-                            if let Some(selected_snip_idx) = selected_snippet {
+                    } else if key.code == KeyCode::Char(*k_delete) {
+                        let selected_snippet = app.found_snippets.state.selected();
+                        if let Some(selected_snip_idx) = selected_snippet {
+                            if !app.snippets.is_empty() {
                                 let snip = &app.found_snippets.items[selected_snip_idx];
-                                ctx.set_contents(snip.code.clone().to_owned()).unwrap();
+                                new_input_mode = InputMode::ConfirmDelete(snip.idx);
                             }
                         }
-                        KeyCode::Char(k_delete) => {
-                            let selected_snippet = app.found_snippets.state.selected();
-                            if let Some(selected_snip_idx) = selected_snippet {
-                                if !app.snippets.is_empty() {
-                                    let snip = &app.found_snippets.items[selected_snip_idx];
-                                    new_input_mode = InputMode::ConfirmDelete(snip.idx);
-                                }
-                            }
-                        }
-                        KeyCode::Esc => {
-                            return Ok(());
-                        }
-                        KeyCode::Up => {
-                            app.found_snippets.previous();
-                        }
-                        KeyCode::Down => {
-                            app.found_snippets.next();
-                        }
-                        KeyCode::Left => {
-                            app.found_snippets.unselect();
-                        }
-                        _ => {}
-                    };
-                    if let Some(editkey) = k_edit {
-                        if key.code == KeyCode::Char(*editkey) {
-                            new_input_mode = edit_snippet_from_list(&mut app, new_input_mode);
-                        };
                     } else {
-                        if key.code == KeyCode::Enter {
+                        if let Some(editkey) = k_edit {
+                            if key.code == KeyCode::Char(*editkey) {
+                                new_input_mode = edit_snippet_from_list(&mut app, new_input_mode);
+                            };
+                        } else if key.code == KeyCode::Enter {
                             new_input_mode = edit_snippet_from_list(&mut app, new_input_mode);
+                        } else {
+                            match key.code {
+                                KeyCode::Esc => {
+                                    return Ok(());
+                                }
+                                KeyCode::Up => {
+                                    app.found_snippets.previous();
+                                }
+                                KeyCode::Down => {
+                                    app.found_snippets.next();
+                                }
+                                KeyCode::Left => {
+                                    app.found_snippets.unselect();
+                                }
+                                _ => {}
+                            };
                         };
                     };
                 }
+
                 InputMode::NewSnippet(new_mode) => {
                     let snip = app.current_snippet.as_mut();
                     if let Some(snip) = snip {
