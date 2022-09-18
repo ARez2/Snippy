@@ -40,9 +40,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // load config if that exists, else create new App
-    let config = match Path::new(CONFIG_PATH).exists() {
+    let path = build_path_with_str(CONFIG_PATH);
+    let config = match Path::new(path.as_str()).exists() {
         true => {
-            let contents = load_string_from_file(CONFIG_PATH);
+            let contents = load_string_from_file(path.as_str());
             let config_deserialized : SnippyConfig = serde_json::from_str(contents.as_str()).unwrap();
             config_deserialized
         },
@@ -52,9 +53,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     
     // load app state from save file if that exists, else create new App
-    let mut app = match Path::new(SAVEFILE_PATH).exists() {
+    let path = build_path_with_str(SAVEFILE_PATH);
+    let mut app = match Path::new(path.as_str()).exists() {
         true => {
-            let contents = load_string_from_file(SAVEFILE_PATH);
+            let contents = load_string_from_file(path.as_str());
             let app_deserialized : App = serde_json::from_str(contents.as_str()).unwrap();
             app_deserialized
         },
@@ -85,28 +87,32 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 
 fn save_app_state(app: &App) {
-    let path = env::current_exe().unwrap();
-    let release_folder = path.parent().unwrap();
-    let target_folder = release_folder.parent().unwrap();
-    let main_folder = target_folder.parent().unwrap();
-    let full_path = main_folder.join(SAVEFILE_PATH);
-    let file = File::create(full_path.to_str().unwrap()).unwrap();
+    let path = build_path_with_str(SAVEFILE_PATH);
+    let file = File::create(path).unwrap();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
     let mut ser = serde_json::Serializer::with_formatter(file, formatter);
     app.serialize(&mut ser).unwrap();
 }
 
 fn save_config_state(config: &SnippyConfig) {
-    let path = env::current_exe().unwrap();
-    let release_folder = path.parent().unwrap();
-    let target_folder = release_folder.parent().unwrap();
-    let main_folder = target_folder.parent().unwrap();
-    let full_path = main_folder.join(CONFIG_PATH);
-    let file = File::create(full_path.to_str().unwrap()).unwrap();
+    let path = build_path_with_str(CONFIG_PATH);
+    let file = File::create(path).unwrap();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
     let mut ser = serde_json::Serializer::with_formatter(file, formatter);
     config.serialize(&mut ser).unwrap();
 }
+
+
+fn build_path_with_str(filename: &str) -> String {
+    let path = env::current_exe().unwrap();
+    let release_folder = path.parent().unwrap();
+    let target_folder = release_folder.parent().unwrap();
+    let main_folder = target_folder.parent().unwrap();
+    let full_path = main_folder.join(filename);
+    let path_str = full_path.to_str().unwrap();
+    String::from(path_str)
+}
+
 
 fn load_string_from_file(path: &str) -> String {
     let mut file = File::open(path).unwrap();
